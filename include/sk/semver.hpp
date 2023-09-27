@@ -7,22 +7,25 @@
 #include <string_view>
 
 
-#if __cplusplus < 202002L
-#define SK_NO_CXX20 1
-#endif
-
-
-
 namespace sk {
+
+
+// Forward declarations.
+template<typename Policy>
+class version;
+class prerelease;
+class build_meta;
+
+
 namespace detail {
 
 
 template<typename Policy>
-class has_parse_fn {
+class has_kPattern_var {
 private:
     template<typename T>
     static auto test(int) ->
-        decltype(T::parse(std::declval<const std::string&>()), std::true_type());
+        decltype(T::kPattern, std::true_type());
 
     template<typename>
     static auto test(...) ->
@@ -34,38 +37,52 @@ public:
 };
 
 
-template<typename>
-struct is_policy 
-    : std::false_type {};
+template<typename Policy>
+class has_validateSchema_fn {
+private:
+    template<typename T>
+    static auto test(int) ->
+        decltype(T::validateSchema(std::declval<const std::cmatch&>()), std::true_type());
 
-template<>
-struct is_policy<struct strict_policy> 
-    : std::true_type {};
+    template<typename>
+    static auto test(...) ->
+        std::false_type;
 
-template<>
-struct is_policy<struct loose_policy> 
-    : std::true_type {};
-
-
-} // namespace sk::detail
+public:
+    constexpr static bool
+    value = decltype(test<Policy>(0))::value;
+};
 
 
 template<typename Policy>
-class version;
-class prerelease;
-class build_meta;
+inline constexpr bool has_validateSchema_fn_v =
+    has_validateSchema_fn<Policy>::value;
 
 
-struct strict_policy final {
+template<typename Policy>
+inline constexpr bool has_kPattern_var_v =
+    has_kPattern_var<Policy>::value;
+
+
+template<typename Policy>
+struct is_parsing_policy {
+    constexpr static bool
+    value = has_kPattern_var_v<Policy> &&
+            has_validateSchema_fn_v<Policy>;
+};
+
+
+template<typename Policy>
+inline constexpr bool is_parsing_policy_v =
+    is_parsing_policy<Policy>::value;
+
+
+
+struct strict_version_parsing_policy final {
     constexpr static std::string_view
     kPattern = "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)"
                "(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))"
                "?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$";
-
-
-    static version<strict_policy>
-    parse(const std::string& input);
-
 
     static void
     validateSchema(const std::cmatch& match) {
@@ -78,47 +95,56 @@ struct strict_policy final {
         if (!match[2].matched) throw std::invalid_argument(kMajorRequired.data());
         if (!match[3].matched) throw std::invalid_argument(kPatchRequired.data());
     }
+};
 
-    static std::uint64_t
-    convertNumeric(std::string_view number,
-                   std::string_view partName) {
-        try {
-            return std::stoull(number.data());
-        } catch (const std::exception&) {
-            throw std::invalid_argument(partName.data());
-        }
+
+
+struct loose_version_parsing_policy final {
+    constexpr static std::string_view
+    kPattern = "^v?(0|[1-9]\\d*)(?:\\.(0|[1-9]\\d*))?(?:\\.(0|[1-9]\\d*))"
+               "?(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))"
+               "?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$";
+
+    static void
+    validateSchema(const std::cmatch& match) {
+        // Only need to validate the the major version is present.
+        constexpr std::string_view kMajorRequired = "Major version is required";
+        if (!match[1].matched) throw std::invalid_argument(kMajorRequired.data());
     }
 };
 
 
 
-struct loose_policy final {
-    constexpr static std::string_view
-    kPattern = "^v?(0|[1-9]\\d*)(?:\\.(0|[1-9]\\d*))?(?:\\.(0|[1-9]\\d*))"
-               "?(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))"
-               "?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$";
-};
+inline std::uint64_t
+convertNumeric(std::string_view number,
+               std::string_view partName) {
+    try {
+        return std::stoull(number.data());
+    } catch (const std::exception&) {
+        throw std::invalid_argument(partName.data());
+    }
+}
 
 
+} // namespace sk::detail
 
 
-/// @brief 
 class prerelease final {
     class part final {
     public:
-        part() = default;
-        ~part() = default;
+        constexpr part() = default;
+                 ~part() = default;
 
-        part(std::string_view value) noexcept
+        constexpr part(std::string_view value) noexcept
             : value_(value) {}
 
-        part(const part&) = default;
-        part& operator=(const part&) = default;
+        constexpr part(const part&) = default;
+        constexpr part& operator=(const part&) = default;
 
-        part(part&&) noexcept = default;
-        part& operator=(part&&) noexcept = default;
+        constexpr part(part&&) noexcept = default;
+        constexpr part& operator=(part&&) noexcept = default;
 
-        static part
+        constexpr static part
         parse(std::string_view text) {
             auto is_valid = std::all_of(text.begin(), text.end(), [](char c) {
                 return std::isalnum(c) || c == '-';
@@ -133,40 +159,40 @@ class prerelease final {
             return part{ text };
         }
 
-    #if SK_NO_CXX20
-        bool
+    #ifdef __cpp_impl_three_way_comparison
+        constexpr std::strong_ordering
+        operator<=>(const part& other) const noexcept {
+            return value_ <=> other.value_;
+        }
+    #else
+        constexpr bool
         operator==(const part& other) const noexcept {
             return value_ == other.value_;
         }
 
-        bool
+        constexpr bool
         operator!=(const part& other) const noexcept {
             return value_ != other.value_;
         }
 
-        bool
+        constexpr bool
         operator<(const part& other) const noexcept {
             return value_ < other.value_;
         }
 
-        bool
+        constexpr bool
         operator>(const part& other) const noexcept {
             return value_ > other.value_;
         }
 
-        bool
+        constexpr bool
         operator<=(const part& other) const noexcept {
             return value_ <= other.value_;
         }
 
-        bool
+        constexpr bool
         operator>=(const part& other) const noexcept {
             return value_ >= other.value_;
-        }
-    #else
-        std::strong_ordering
-        operator<=>(const part& other) const noexcept {
-            return value_ <=> other.value_;
         }
     #endif
 
@@ -175,23 +201,45 @@ class prerelease final {
     };
 
 public:
-    /// @brief  Parses a string into a prerelease.
-    ///         A valid prerelease string is a non-empty string consisting of
-    ///         one or more dot-separated parts. Each part must be a non-empty
-    ///         string consisting of only alphanumeric characters and hyphens.
-    /// @param  str The string to parse.
-    /// @return A valid prerelease object constructed from the parsed input.
-    /// @throws std::invalid_argument when the string is not a valid prerelease.
+    constexpr prerelease() = default;
+             ~prerelease() = default;
+
+    constexpr prerelease(std::string_view value,
+                         std::vector<part> parts) noexcept
+        : value_(value)
+        , parts_(std::move(parts)) {}
+
+    constexpr prerelease(std::string_view value,
+                         std::vector<std::string_view> parts) noexcept
+        : value_(value) {
+        for (auto substr : parts)
+            parts_.emplace_back(part::parse(substr));
+    }
+    
+    constexpr prerelease(const prerelease&) = default;
+    constexpr prerelease(prerelease&&) noexcept = default;
+    constexpr prerelease& operator=(const prerelease&) = default;
+    constexpr prerelease& operator=(prerelease&&) noexcept = default;
+
+    #ifdef __cpp_impl_three_way_comparison
+        constexpr std::weak_ordering
+        operator<=>(const prerelease& other) const noexcept {
+            return parts_ <=> other.parts_;
+        }
+    #else
+
+    #endif
+
+    // TODO: attempt to make constexpr.
     static prerelease
     parse(std::string_view str) {
         if (str.empty())
             return prerelease{};
 
-        prerelease result;
-        result.value_ = str;
-        for (auto substr : split(result.value_))
-            result.parts_.emplace_back(part::parse(substr));
-        return result;
+        std::vector<part> parts;
+        for (auto substr : split(str))
+            parts.emplace_back(part::parse(substr));
+        return prerelease{ str, parts };
     }
 
 private:
@@ -218,6 +266,7 @@ private:
     std::vector<part> parts_;
     std::string_view  value_;
 };
+
 
 
 class build_meta final {
@@ -252,8 +301,14 @@ private:
 
 
 
-template<typename Policy = strict_policy>
+template<typename Policy = detail::strict_version_parsing_policy>
 class version final {
+    constexpr static std::string_view kPolicyError =
+        "Policy must implement a static parse(const std::string&) function.";
+
+    // Verify that the policy implements a static parse(const std::string&) function.
+    static_assert(detail::is_parsing_policy_v<Policy>, kPolicyError.data());
+
 public:
     version() = default;
     ~version() = default;
@@ -277,7 +332,42 @@ public:
 
     static version
     parse(const std::string& str) {
-        return Policy::parse(str);
+        auto regex = std::regex(Policy::kPattern.data());
+
+        std::cmatch match;
+        if (!std::regex_match(input.data(), match, regex))
+            throw std::invalid_argument("invalid version string");
+
+        std::uint64_t major = 0;
+        std::uint64_t minor = 0;
+        std::uint64_t patch = 0;
+        prerelease    prerel;
+        build_meta    meta;
+        try {
+            Policy::validateSchema(match);
+            major = convertNumeric(match[1].str(), "major");
+            minor = match[2].matched
+                ? convertNumeric(match[2].str(), "minor")
+                : 0;
+            patch = match[3].matched
+                ? convertNumeric(match[3].str(), "patch")
+                : 0;
+
+            if (match[4].matched) prerel = prerelease::parse(match[4].str());
+            if (match[5].matched) meta   = build_meta::parse(match[5].str());
+        } catch (const std::exception& e) {
+            constexpr std::string_view kErrorMessage =
+                "Failed to parse version string: ";
+            
+            std::ostringstream out;
+            out << kErrorMessage
+                << e.what();
+            
+            throw std::invalid_argument(out.str());
+        }
+
+        // return version<detail::strict_version_parsing_policy>.
+        return { major, minor, patch, prerel, meta };
     }
 
 private:
@@ -291,52 +381,7 @@ private:
 };
 
 
-
-template<>
-class version<loose_policy> final {
-
-};
-
-
-
-inline version<strict_policy>
-strict_policy::parse(const std::string& input)  {
-    auto regex = std::regex(kPattern.data());
-
-    std::cmatch match;
-    if (!std::regex_match(input.data(), match, regex))
-        throw std::invalid_argument("invalid version string");
-
-    std::uint64_t major = 0;
-    std::uint64_t minor = 0;
-    std::uint64_t patch = 0;
-    prerelease    prerel;
-    build_meta    meta;
-    try {
-        validateSchema(match);
-        major = convertNumeric(match[1].str(), "major");
-        minor = convertNumeric(match[2].str(), "minor");
-        patch = convertNumeric(match[3].str(), "patch");
-
-        if (match[4].matched) prerel = prerelease::parse(match[4].str());
-        if (match[5].matched) meta   = build_meta::parse(match[5].str());
-    } catch (const std::exception& e) {
-        constexpr std::string_view kErrorMessage =
-            "Failed to parse version string: ";
-        
-        std::ostringstream out;
-        out << kErrorMessage
-            << e.what();
-        
-        throw std::invalid_argument(out.str());
-    }
-
-    return version<strict_policy>{ major, minor, patch, prerel, meta };
-}
-
-
 } // namespace sk
 
-
-#undef SK_NO_CXX20
+#undef SK_CONSTEXPR
 #endif // SK_SEMVER_HPP
