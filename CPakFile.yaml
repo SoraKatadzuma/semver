@@ -1,0 +1,30 @@
+project:
+  name: semver
+  gpid: SoraKatadzuma
+  semv: 0.0.1-alpha+dev
+  desc: Semantic version parser for my C++ projects.
+  home: https://github.com/SoraKatadzuma/semver
+  issues: https://github.com/SoraKatadzuma/semver/issues
+  license: MIT
+  authors:
+  - John Christman sorakatadzuma@gmail.com
+
+dependencies:
+- SoraKatadzuma/config@1.0.0
+
+targets:
+- name: sk::semver
+  type: interface
+  search:
+    include:
+    - include
+
+- name: semver_test
+  type: executable
+  search:
+    include:
+    - include
+  interfaces:
+  - sk::semver
+  sources:
+  - tests/semver.cpp
